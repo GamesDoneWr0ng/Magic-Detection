@@ -1,0 +1,1 @@
+This is the base for the magic circle detection program in DungeonMages.
