@@ -33,6 +33,10 @@ SIZE = 600 # Screen size
 SCREENSIZE = (SIZE, SIZE)
 
 class Line:
+    """Class for storing both straight and curved lines:
+    Info stored: Startpoint, endpoint
+    Bonus for curved: Center, Angle(positive or negative) The circle curves for example 90 degrees clockwise from the start around the center
+    Also got the radius varies which one is used tbh"""
     def __init__(self, start: np.ndarray, end: np.ndarray, center: None | np.ndarray, id: int, angle: None | float = None) -> None:
         self._center = center
         self._angle = angle
@@ -94,12 +98,17 @@ class Line:
 #endregion
 
     def _getRadius(self) -> float:
+        """Get radius as average between distance to the start and end from the center"""
         if self._center is not None:
             return (np.linalg.norm(self._start - self._center) + np.linalg.norm(self._end - self._center)) * 0.5
         else:
             return 0
 
     def connect(self, other: Self) -> bool:
+        """Merge two lines together
+        Straight lines need low angle between them and a low distance between them
+        Circles requires distance between centers to be low, difference between radii to be low and a overlapping span
+        Sometimes we would want merging when centers arent close, but this isnt suported with this implementation"""
         if self._center is None and other._center is None:
             a = self._end - self._start
             b = other._end - other._start
@@ -202,6 +211,7 @@ class Line:
         return False
 
     def distanceTo(self, point: np.ndarray) -> float:
+        """Returns the shortest distance to a given point from the line"""
         if self._center is None:
             lengthSquared = distanceSquared(self._start, self._end)
             t = np.clip(np.dot(point-self._start, (self._end - self._start)) / lengthSquared, 0, 1)
@@ -234,6 +244,7 @@ class Line:
                 return min(np.linalg.norm(point - self._start), np.linalg.norm(point - end))
 
     def isTouching(self, other: Self) -> bool:
+        """Returns if this line is touching with another line."""
         if other._id in self._touches:
             return self._touches[other._id]
 
@@ -372,6 +383,7 @@ class Line:
             return False
 
     def getBounds(self) -> np.ndarray:
+        """Returns a rectangle that fully contains this line"""
         if self._center is None:
             return np.array([[min(self._start[0], self._end[0]), min(self._start[1], self._end[1])],
                              [max(self._start[0], self._end[0]), max(self._start[1], self._end[1])]])
@@ -380,6 +392,7 @@ class Line:
                              [self._center[0] + self._radius, self._center[1] + self._radius],])
 
     def norm(self, bounds: np.ndarray) -> None:
+        """ 'Normalizes' the line so all values are between 0-1, for circles also makes them counter clockwise"""
         size = bounds[1] - bounds[0]
         self._start = (self._start - bounds[0]) / size
         self._end = (self._end - bounds[0]) / size
@@ -394,6 +407,7 @@ class Line:
                 self._angle *= -1
 
     def cost(self, other: Self) -> float:
+        """Returns the difference between this line and the other line used for pattern matching"""
         if self._center is None and other._center is None:
             return np.sqrt(min(
                     distanceSquared(self._start, other._start) + distanceSquared(self._end, other._end),
@@ -427,6 +441,8 @@ class Line:
 
 
 class Connection:
+    """To avoid having to separate runes when you cant differentiate between lines and connections,
+    therefore connections are made with their own material, if you dont like it make it yorself"""
     def __init__(self, start: np.ndarray, end: np.ndarray, points: list[np.ndarray], id: int) -> None:
         self._start = start
         self._end = end
@@ -443,9 +459,11 @@ class Connection:
         self._id = id
 
     def isTouching(self, point: np.ndarray) -> bool:
+        """If this connection touches a certain point, used for conencting with other connections"""
         return np.any(np.linalg.norm(self._points - point, axis=1) < CONNECTION_DISTANCE)
 
     def connect(self, other: Self) -> None:
+        """Actually connect this connection to another connection"""
         self ._connections.add(other._id)
         other._connections.add(self._id)
 
@@ -485,6 +503,8 @@ def best_fit_circle(points) -> None | tuple[bool, np.ndarray, float]:
     Given a list of 2D numpy arrays (points), return the center (x, y)
     of the circle that best fits all points in a least-squares sense.
     Return None if no unique circle exists.
+
+    Detecting circles basicly
     """
     points = np.array(points)
     if len(points) < 3:
@@ -533,7 +553,7 @@ def points_near_line(points, max_dist):
     Given a list of 2D numpy arrays (points), determine whether there exists
     a line such that all points are within 'max_dist' from it.
 
-    Returns True if such a line exists, False otherwise.
+    Returns if the line exists along with the line.
     """
     points = np.array(points)
     if len(points) < 2:
@@ -575,6 +595,18 @@ def point_within_line_distance(point, line_point, direction, max_dist):
     return dist <= max_dist
 
 def getLines(screen: pg.Surface) -> list[Line|Connection]:
+    """Main function for getting the lines
+    Rendering is also here
+    Whenever you are clicking sample the mouse position, if the distance to the last stored point is great enough store it
+    We have a list of stored points that we will try to match to a straight line with points_near_line
+    If we don't have a match for a line we try to fit the points to a circle with best_fit_circle
+    If we now match a circle keep the line as a circle til we can no longer match it as a circle and store it
+    If we never where able to match the points to a circle we store it as a straight line
+    Some extra cases:
+    If we ever stop clicking store the line we have
+    If the angle between the current move and the last move (angle between last 3 points) is to great we detect a corner, store the line and start a new one
+
+    We also draw connections here but they are simpler"""
     lines: list[Line | Connection] = []
     currentLine: None | Line = None
 
@@ -730,22 +762,21 @@ class RuneType(IntEnum):
     FIRE = 10
 
 class Rune:
-    def __init__(self, runeType: RuneType, tier: int, id: int, lines: list[int], nextRune: None | Self = None) -> None:
+    def __init__(self, runeType: RuneType, tier: int, id: int, nextRune: None | Self = None) -> None:
         self._type = runeType
         self._tier = tier
         self._id = id
-        self._lines = lines
         self._next = nextRune
 
-    @property
-    def lines(self) -> list[int]:
-        return self._lines
-
     def __str__(self) -> str:
-        return f"{self._type.name} {self._tier} {self._id} {self._lines} {self._next}"
+        return f"{self._type.name} {self._tier} {self._id} {self._next}"
 
     def __eq__(self, other: Self) -> bool:
         return self._type == other._type & self._tier == other._tier
+
+class RuneSocket:
+    def __init__(self, runeId: int, idx: int) -> None:
+        pass
 
 Pattern = List[Line]
 class PatternMatcher:
@@ -843,7 +874,7 @@ def linesTouchingCircle(lines: list[Line], center: np.ndarray, radius: float, to
             result.append(idx)
     return result
 
-def detectRune(lines: list[Line], used: set[int], start: np.ndarray) -> None | Rune:
+def detectRune(lines: list[Line], used: set[int], start: np.ndarray, patternMatcher: PatternMatcher) -> None | Rune:
     startLine: Line = min(filter(lambda l: isinstance(l, Line), lines), key=lambda l: l.distanceTo(start))
     if startLine.distanceTo(start) > RUNE_CONNECTION_DISTANCE:
         return None
@@ -878,12 +909,14 @@ def detectRune(lines: list[Line], used: set[int], start: np.ndarray) -> None | R
     for i in current:
         i.norm(bounds)
 
-    return None
+    rune, score = patternMatcher.match(current)
+    return rune
 
-def detectRunes(lines: list[Line|Connection]) -> list[Rune]:
+def detectRunes(lines: list[Line|Connection], patternMatcher: PatternMatcher) -> list[Rune]:
     runes: list[Rune] = []
 
     lines = mergeLines(lines)
+    startLines = []
     used: set[int] = set()
 
     # find start
@@ -909,14 +942,17 @@ def detectRunes(lines: list[Line|Connection]) -> list[Rune]:
                 angles.sort()
                 diffs = [(angles[(i+1) % len(angles)] - angles[i]) % np.pi for i in range(len(angles))]
                 if max(diffs) - min(diffs) < START_ANGLE_ACCEPTANCE / len(angles):
-                    runes.append(Rune(RuneType.START, len(angles) - 2, len(runes), startLines))
+                    runes.append(Rune(RuneType.START, len(angles) - 2, len(runes)))
                     break
     if len(runes) == 0:
         return runes
 
-    print(runes[0])
+    used.update(startLines)
 
-    used.update(runes[0].lines)
+    openConnections = []
+    closedConnections = []
+
+
 
     return runes
 
