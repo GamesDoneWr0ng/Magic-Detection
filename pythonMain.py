@@ -18,7 +18,7 @@ CONNECTION_DISTANCE = 20
 
 # Line merge parameters
 MERGE_DISTANCE = 10 # max distance between straight lines
-MERGE_ANGLE = 0.1 # max angle between straight lines
+MERGE_ANGLE = 0.98 # max angle between straight lines
 CENTER_DISTANCE = 20 ** 2 # max distance between circle centers
 MERGE_RADIUS = 20 # max difference in radii
 CIRCLE_MERGE_DISTANCE = np.pi * 0.1 # max angle between circle segments
@@ -120,7 +120,7 @@ class Line:
 
             norm = (a + b) / np.linalg.norm(a + b)
 
-            v = max(other._start - self._start, other._end - self._start, key=lambda i: distanceSquared(self._start, i))
+            v = max(other._start, other._end, key=lambda i: distanceSquared(self._start, i)) - self._start
             # v = other._start - self._start
             perp_dist = np.linalg.norm(v - np.dot(v, norm) * norm)
             if perp_dist > MERGE_DISTANCE:
@@ -437,8 +437,6 @@ class Line:
 
     def __str__(self) -> str:
         return f"Start: {self._start}, End: {self._end}, Center: {self._center}, Angle: {np.rad2deg(self._angle) if self._angle is not None else None}, Id: {self._id}"
-
-
 
 class Connection:
     """To avoid having to separate runes when you cant differentiate between lines and connections,
@@ -961,7 +959,8 @@ def detectRunes(lines: list[Line|Connection], patternMatcher: PatternMatcher) ->
 def main() -> None:
     screen = pg.display.set_mode(SCREENSIZE)
     lines = getLines(screen)
-    detectRunes(lines)
+    patternMatcher = PatternMatcher()
+    detectRunes(lines, patternMatcher)
 
     merged = [] #testMerge(lines)
     # print(merged)
