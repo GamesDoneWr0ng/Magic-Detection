@@ -107,8 +107,8 @@ class Line:
     def connect(self, other: Self) -> bool:
         """Merge two lines together
         Straight lines need low angle between them and a low distance between them
-        Circles requires distance between centers to be low, difference between radii to be low and a overlapping span
-        Sometimes we would want merging when centers arent close, but this isnt suported with this implementation"""
+        Circles requires distance between centers to be low, difference between radii to be low and an overlapping span
+        Sometimes we would want merging when centers aren't close, but this isn't supported with this implementation"""
         if self._center is None and other._center is None:
             a = self._end - self._start
             b = other._end - other._start
@@ -245,6 +245,9 @@ class Line:
 
     def isTouching(self, other: Self) -> bool:
         """Returns if this line is touching with another line."""
+        if not isinstance(other, Line):
+            return False
+
         if other._id in self._touches:
             return self._touches[other._id]
 
@@ -392,7 +395,7 @@ class Line:
                              [self._center[0] + self._radius, self._center[1] + self._radius],])
 
     def norm(self, bounds: np.ndarray) -> None:
-        """ 'Normalizes' the line so all values are between 0-1, for circles also makes them counter clockwise"""
+        """ 'Normalizes' the line so all values are between 0-1, for circles also makes them counter-clockwise"""
         size = bounds[1] - bounds[0]
         self._start = (self._start - bounds[0]) / size
         self._end = (self._end - bounds[0]) / size
@@ -440,7 +443,7 @@ class Line:
 
 class Connection:
     """To avoid having to separate runes when you cant differentiate between lines and connections,
-    therefore connections are made with their own material, if you dont like it make it yorself"""
+    therefore connections are made with their own material, if you don't like it make it yourself"""
     def __init__(self, start: np.ndarray, end: np.ndarray, points: list[np.ndarray], id: int) -> None:
         self._start = start
         self._end = end
@@ -456,8 +459,23 @@ class Connection:
     def id(self, id: int) -> None:
         self._id = id
 
+    @property
+    def start(self) -> np.ndarray:
+        return self._start
+
+    @property
+    def end(self) -> np.ndarray:
+        return self._end
+
+    @property
+    def connections(self) -> set[int]:
+        return self._connections
+
+    def open(self, source: np.ndarray) -> np.ndarray:
+        return max(self._start, self._end, key=lambda p: distanceSquared(p, source))
+
     def isTouching(self, point: np.ndarray) -> bool:
-        """If this connection touches a certain point, used for conencting with other connections"""
+        """If this connection touches a certain point, used for connecting with other connections"""
         return np.any(np.linalg.norm(self._points - point, axis=1) < CONNECTION_DISTANCE)
 
     def connect(self, other: Self) -> None:
@@ -502,7 +520,7 @@ def best_fit_circle(points) -> None | tuple[bool, np.ndarray, float]:
     of the circle that best fits all points in a least-squares sense.
     Return None if no unique circle exists.
 
-    Detecting circles basicly
+    Detecting circles basically
     """
     points = np.array(points)
     if len(points) < 3:
@@ -745,11 +763,6 @@ def getLines(screen: pg.Surface) -> list[Line|Connection]:
 #endregion
 
 #region Rune Detection
-"""
-IDEAS:
-Have start rune spesify amount of registers/memory prob. registers
-Circle divided like a pizza, one slice per register
-"""
 class RuneType(IntEnum):
     START = 0
     PATH = 1
@@ -766,6 +779,13 @@ class Rune:
         self._id = id
         self._next = nextRune
 
+    def getConnections(self, lines: list[Line|Connection]) -> list[int]:
+        result = []
+        for l in lines:
+            if isinstance(l, Connection):
+                result.append(l.id)
+        return result
+
     def __str__(self) -> str:
         return f"{self._type.name} {self._tier} {self._id} {self._next}"
 
@@ -774,7 +794,24 @@ class Rune:
 
 class RuneSocket:
     def __init__(self, runeId: int, idx: int) -> None:
-        pass
+        self._runeId = runeId
+        self._idx = idx
+
+    @property
+    def idx(self) -> int:
+        return self._idx
+
+    @idx.setter
+    def idx(self, idx) -> None:
+        self._idx = idx
+
+    @property
+    def runeId(self) -> int:
+        return self._runeId
+
+    @runeId.setter
+    def runeId(self, runeId) -> None:
+        self._runeId = runeId
 
 Pattern = List[Line]
 class PatternMatcher:
@@ -877,12 +914,14 @@ def detectRune(lines: list[Line], used: set[int], start: np.ndarray, patternMatc
     if startLine.distanceTo(start) > RUNE_CONNECTION_DISTANCE:
         return None
     current = [startLine]
+    if startLine.id in used:
+        return None
     used.add(startLine.id)
     found = True
     while found:
         found = False
         for line in lines:
-            if line.id in used:
+            if line.id in used or not isinstance(line, Line):
                 continue
 
             for k in current:
@@ -897,7 +936,7 @@ def detectRune(lines: list[Line], used: set[int], start: np.ndarray, patternMatc
     if len(current) == 0:
         return None
 
-    bounds = np.array([[0,0], [np.inf, np.inf]])
+    bounds = np.array([[np.inf, np.inf], [0,0]])
     for i in current:
         b = i.getBounds()
         bounds[0][bounds[0] > b[0]] = b[0][bounds[0] > b[0]]
@@ -947,10 +986,20 @@ def detectRunes(lines: list[Line|Connection], patternMatcher: PatternMatcher) ->
 
     used.update(startLines)
 
-    openConnections = []
+    openConnections = runes[0].getConnections(lines)
     closedConnections = []
 
+    while len(openConnections) > 0:
+        connection = openConnections.pop()
+        closedConnections.append(connection)
+        for i in lines[connection].connections:
+            if i not in closedConnections and i not in openConnections:
+                openConnections.append(i)
 
+        for p in [lines[connection].start, lines[connection].end]:
+            rune = detectRune(lines, used, p, patternMatcher)
+            if rune is not None:
+                runes.append(rune)
 
     return runes
 
@@ -959,8 +1008,12 @@ def detectRunes(lines: list[Line|Connection], patternMatcher: PatternMatcher) ->
 def main() -> None:
     screen = pg.display.set_mode(SCREENSIZE)
     lines = getLines(screen)
+
     patternMatcher = PatternMatcher()
-    detectRunes(lines, patternMatcher)
+    patternMatcher.add_pattern("a", [Line(np.array([0,0]), np.array([0,1]), None, 0)], Rune(RuneType.OPERATOR, 0, 0))
+
+    runes = detectRunes(lines, patternMatcher)
+    print(runes)
 
     merged = [] #testMerge(lines)
     # print(merged)
